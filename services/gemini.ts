@@ -8,16 +8,19 @@ import { persistence } from './persistence';
 const getAiClient = () => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
-    throw new Error("API Key nicht gefunden.");
+    throw new Error("API Key nicht gefunden. Bitte prüfe die Kodierung deiner .env Datei (muss UTF-8 sein).");
   }
   return new GoogleGenAI({ apiKey });
 };
+
+// Upgrade to 'gemini-3-flash-preview' for text tasks as per guidelines
+const DEFAULT_MODEL = 'gemini-3-flash-preview';
 
 export const sendChatMessage = async (message: string, history: any[], title: string, type: 'BOOK' | 'THEME') => {
   const ai = getAiClient();
   const context = type === 'BOOK' ? `das Werk "${title}"` : `das philosophische Thema "${title}"`;
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: DEFAULT_MODEL,
     contents: [
         ...history.map(h => ({ 
             role: h.role === 'user' ? 'user' : 'model', 
@@ -26,9 +29,10 @@ export const sendChatMessage = async (message: string, history: any[], title: st
         { role: 'user', parts: [{ text: message }] }
     ],
     config: {
-      systemInstruction: `${SYSTEM_INSTRUCTION_BASE}\nDu diskutierst gerade mit deinem Gegenüber über ${context}. Antworte eloquent und tiefgründig.`
+      systemInstruction: `${SYSTEM_INSTRUCTION_BASE}\nNadine möchte mit dir über ${context} sprechen. Sei charmant und klug.`
     }
   });
+  // Correctly access .text property from response
   return response.text || "";
 };
 
@@ -46,23 +50,19 @@ const BOOK_SCHEMA_REQUIRED = ["id", "title", "author", "year", "description", "c
 
 export const getBookDeepAnalysis = async (title: string, author: string): Promise<string> => {
   const cacheKey = `analysis_${title}_${author}`;
-  
-  // 1. Memory Cache
   const memCached = appCache.get<string>(cacheKey);
   if (memCached) return memCached;
 
-  // 2. Persistent Storage
   const dbCached = await persistence.getContent<string>(cacheKey);
   if (dbCached) {
     appCache.set(cacheKey, dbCached);
     return dbCached;
   }
 
-  // 3. API Fallback
   const ai = getAiClient();
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: `Erstelle eine ausführliche Analyse zu "${title}" von ${author} für deinen Nutzer. Duze den Leser.`,
+    model: DEFAULT_MODEL,
+    contents: `Erstelle eine tiefschürfende Analyse zu "${title}" von ${author}.`,
     config: { systemInstruction: SYSTEM_INSTRUCTION_BASE }
   });
   
@@ -74,10 +74,9 @@ export const getBookDeepAnalysis = async (title: string, author: string): Promis
 
 export const getRecommendedBooksCategorized = async (): Promise<{classics: Book[], contemporary: Book[], nonEuropean: Book[]}> => {
     const ai = getAiClient();
-    const seed = Math.floor(Math.random() * 1000000);
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Erstelle eine kuratierte Liste von Büchern für drei Kategorien. Seed: ${seed}.`,
+      model: DEFAULT_MODEL,
+      contents: `Erstelle eine literarische Auswahl für die Bibliothek.`,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION_BASE,
         responseMimeType: "application/json",
@@ -98,8 +97,8 @@ export const getRecommendedBooksCategorized = async (): Promise<{classics: Book[
 export const getRecommendedBooks = async (intent?: string): Promise<Book[]> => {
     const ai = getAiClient();
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Gib mir 6 Buchempfehlungen passend zum Intent: ${intent || 'GENERAL'}.`,
+      model: DEFAULT_MODEL,
+      contents: `Empfiehl 6 Bücher für den Bereich ${intent || 'GENERAL'}.`,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION_BASE,
         responseMimeType: "application/json",
@@ -115,8 +114,8 @@ export const getRecommendedBooks = async (intent?: string): Promise<Book[]> => {
 export const searchBooks = async (query: string): Promise<Book[]> => {
     const ai = getAiClient();
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Suche nach Büchern: "${query}".`,
+      model: DEFAULT_MODEL,
+      contents: `Suche nach: "${query}".`,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION_BASE,
         responseMimeType: "application/json",
@@ -132,8 +131,8 @@ export const searchBooks = async (query: string): Promise<Book[]> => {
 export const generateQuiz = async (topic: string, diff: Difficulty, focus: QuizFocus): Promise<QuizQuestion[]> => {
     const ai = getAiClient();
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Erstelle ein Quiz für deinen Nutzer zum Thema "${topic}". Schwierigkeit: ${diff}, Fokus: ${focus}. Duze ihn.`,
+      model: DEFAULT_MODEL,
+      contents: `Erstelle ein Quiz zu "${topic}".`,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION_BASE,
         responseMimeType: "application/json",
@@ -153,14 +152,14 @@ export const generateStorySegment = async (
   deepDiveQuery?: string
 ): Promise<{ narrative: string, choices: string[] }> => {
     const ai = getAiClient();
-    let prompt = choice ? `Nutzer-Wahl: "${choice}". Kontext: ${context.slice(-600)}.` : `Beginne eine interaktive Nach-Erzählung von "${title}".`;
-    if (deepDiveQuery) prompt = `Vertiefung: "${deepDiveQuery}". Kontext: ${context.slice(-600)}.`;
+    let prompt = choice ? `Entscheidung: "${choice}".` : `Lass uns "${title}" atmosphärisch nacherleben.`;
+    if (deepDiveQuery) prompt = `Vertiefung: "${deepDiveQuery}".`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: DEFAULT_MODEL,
       contents: prompt,
       config: {
-        systemInstruction: `${SYSTEM_INSTRUCTION_BASE}\nSchreibe atmosphärisch im Präsens. Duze den Nutzer.`,
+        systemInstruction: `${SYSTEM_INSTRUCTION_BASE}\nNimm die Leserin mit auf eine immersive Reise.`,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -188,8 +187,8 @@ export const getTableOfContents = async (title: string): Promise<string[]> => {
 
     const ai = getAiClient();
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Erstelle ein detailliertes Inhaltsverzeichnis für "${title}".`,
+      model: DEFAULT_MODEL,
+      contents: `Inhaltsverzeichnis von "${title}".`,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION_BASE,
         responseMimeType: "application/json",
@@ -219,12 +218,18 @@ export const getChapterContent = async (
     }
 
     const ai = getAiClient();
-    let prompt = book.isPublicDomain 
-      ? `GIB DEN EXAKTEN ORIGINALTEXT von "${chap}" aus "${book.title}" aus.` 
-      : `Erstelle eine ausführliche Nacherzählung von "${chap}" aus "${book.title}". Duze den Nutzer.`;
+    let prompt = "";
+    
+    if (book.isPublicDomain) {
+      prompt = `GIB DEN VOLLSTÄNDIGEN ORIGINALTEXT (VERBATIM) von "${chap}" aus "${book.title}" von ${book.author} aus. 
+      WICHTIG: Das Werk ist gemeinfrei. Liefere den echten Text Wort für Wort. 
+      KEINE Zusammenfassungen. Gib nur den reinen literarischen Text zurück.`;
+    } else {
+      prompt = `Erstelle eine SEHR AUSFÜHRLICHE Nacherzählung von "${chap}" aus "${book.title}". Behalte den Stil des Autors bei.`;
+    }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: DEFAULT_MODEL, 
       contents: prompt,
       config: { 
         systemInstruction: SYSTEM_INSTRUCTION_BASE,
@@ -240,23 +245,22 @@ export const getChapterContent = async (
       }
     });
     
-    const result = JSON.parse(response.text || '{"text": "Fehler.", "isOriginal": false}');
+    const result = JSON.parse(response.text || '{"text": "Fehler beim Laden des Archivs.", "isOriginal": false}');
     appCache.set(cacheKey, result);
     await persistence.saveContent(cacheKey, result);
-    // Wenn wir ein Kapitel speichern, speichern wir auch das Metadaten-Objekt des Buches
     await persistence.saveBook(book);
     return result;
 };
 
 export const generateRandomDiscovery = async (contextWord?: string): Promise<DiscoveryFragment> => {
   const ai = getAiClient();
-  const prompt = contextWord ? `Reise fortsetzen: "${contextWord}".` : `Neue Entdeckungsreise starten.`;
+  const prompt = contextWord ? `Interesse an: "${contextWord}".` : `Überrasche mit einem literarischen Fundstück.`;
     
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: DEFAULT_MODEL,
     contents: prompt,
     config: {
-      systemInstruction: `${SYSTEM_INSTRUCTION_BASE} Duze den Leser. Gib NUR JSON zurück.`,
+      systemInstruction: SYSTEM_INSTRUCTION_BASE,
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,

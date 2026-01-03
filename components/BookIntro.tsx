@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Book, AppMode, ReadingPreference } from '../types';
 import { getBookDeepAnalysis, getTableOfContents, getChapterContent } from '../services/gemini';
+import { persistence } from '../services/persistence';
 
 interface BookIntroProps {
   book: Book;
@@ -15,9 +16,13 @@ const BookIntro: React.FC<BookIntroProps> = ({ book, onSelectMode, onBack }) => 
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [pref, setPref] = useState<ReadingPreference>('CHRONOLOGICAL');
   const [focusText, setFocusText] = useState('');
+  
+  // Download State
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [isFullyCached, setIsFullyCached] = useState(false);
 
   useEffect(() => {
-    // 1. Tiefenanalyse laden
     const loadAnalysis = async () => {
       setLoading(true);
       try {
@@ -30,25 +35,39 @@ const BookIntro: React.FC<BookIntroProps> = ({ book, onSelectMode, onBack }) => 
       }
     };
 
-    // 2. Background Preloading für Lektüre-Modus
-    // Wir laden das Inhaltsverzeichnis und das erste Kapitel im Hintergrund, 
-    // während der Nutzer die Analyse liest.
-    const preLoadContent = async () => {
-      try {
-        const toc = await getTableOfContents(book.title);
-        if (toc && toc.length > 0) {
-          console.debug(`[Preload] Starte Laden von Kapitel: ${toc[0]}`);
-          // Wir warten nicht auf das Ergebnis hier, es füllt einfach den appCache im Hintergrund
-          getChapterContent(book, toc[0]);
-        }
-      } catch (e) {
-        console.debug("[Preload] Fehler beim Vorladen", e);
-      }
+    const checkCacheStatus = async () => {
+      const stored = await persistence.getAllBooks();
+      setIsFullyCached(stored.some(b => b.id === book.id));
     };
 
     loadAnalysis();
-    preLoadContent();
+    checkCacheStatus();
   }, [book]);
+
+  const handleDownloadFullBook = async () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
+    setDownloadProgress(0);
+
+    try {
+      const toc = await getTableOfContents(book.title);
+      if (!toc || toc.length === 0) throw new Error("Kein Inhaltsverzeichnis gefunden.");
+
+      for (let i = 0; i < toc.length; i++) {
+        await getChapterContent(book, toc[i]);
+        setDownloadProgress(Math.round(((i + 1) / toc.length) * 100));
+      }
+
+      await persistence.saveBook(book);
+      setIsFullyCached(true);
+      alert(`Na Nadine, das war ein Kraftakt! "${book.title}" steht nun vollständig in deinem Regal.`);
+    } catch (e) {
+      console.error(e);
+      alert("Ach Nadine, beim Drucken ist wohl die Tinte ausgegangen. Bitte versuche es noch einmal.");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   const handleReadClick = () => {
     if (book.isPublicDomain) {
@@ -73,33 +92,49 @@ const BookIntro: React.FC<BookIntroProps> = ({ book, onSelectMode, onBack }) => 
       </button>
 
       <div className="text-center mt-12 mb-12">
-        <div className="flex justify-center mb-4">
+        <div className="flex justify-center items-center gap-4 mb-4">
            <span className={`px-4 py-1 rounded-full text-sm font-bold tracking-widest uppercase border ${book.isPublicDomain ? 'border-green-300 bg-green-50 text-green-700 dark:border-green-900/50 dark:bg-green-900/20 dark:text-green-400' : 'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-900/50 dark:bg-orange-900/20 dark:text-orange-400'}`}>
              {book.isPublicDomain ? '📜 Originalwerk verfügbar' : '✨ KI-gestütztes Nach-Erleben'}
            </span>
+           {book.isPublicDomain && !isFullyCached && !isDownloading && (
+             <button 
+               onClick={handleDownloadFullBook}
+               className="text-xs underline font-serif text-gray-400 hover:text-gray-800 dark:hover:text-zinc-200"
+             >
+               Volltext laden
+             </button>
+           )}
+           {isDownloading && (
+             <div className="flex items-center gap-2">
+                <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                   <div className="bg-green-500 h-full transition-all duration-300" style={{ width: `${downloadProgress}%` }} />
+                </div>
+                <span className="text-[10px] font-serif text-gray-400">{downloadProgress}%</span>
+             </div>
+           )}
+           {isFullyCached && (
+             <span className="text-xs font-serif text-green-600 dark:text-green-400">✓ Lokal gespeichert</span>
+           )}
         </div>
         
-        <h1 className="text-6xl md:text-7xl font-serif font-bold text-gray-800 dark:text-zinc-100 mb-4 leading-tight transition-colors">
+        <h1 className="text-6xl md:text-7xl font-serif font-bold text-gray-800 dark:text-zinc-100 mb-4 leading-tight">
           {book.title}
         </h1>
         <p className="text-4xl font-hand text-gray-600 dark:text-zinc-400 mb-8">{book.author} ({book.year})</p>
         
-        <div className="max-w-2xl mx-auto bg-white dark:bg-zinc-800 bg-opacity-60 dark:bg-opacity-20 p-8 border-y-2 border-gray-200 dark:border-zinc-800 italic font-serif text-2xl leading-relaxed text-gray-700 dark:text-zinc-300 transition-all mb-12">
+        <div className="max-w-2xl mx-auto bg-white dark:bg-zinc-800 bg-opacity-60 dark:bg-opacity-20 p-8 border-y-2 border-gray-200 dark:border-zinc-800 italic font-serif text-2xl leading-relaxed text-gray-700 dark:text-zinc-300 mb-12">
           {book.description}
         </div>
 
-        {/* Deep Analysis Section */}
         <div className="text-left bg-white dark:bg-zinc-900 bg-opacity-40 dark:bg-opacity-20 p-8 md:p-12 sketch-border transition-colors">
           <h2 className="text-3xl font-serif font-bold mb-6 border-b border-dashed border-gray-300 dark:border-zinc-700 pb-2 dark:text-zinc-200">
-            Tiefenanalyse & Kontext
+             Analyse für dich, Nadine
           </h2>
           {loading ? (
             <div className="space-y-4 animate-pulse">
               <div className="h-4 bg-gray-200 dark:bg-zinc-700 rounded w-full"></div>
               <div className="h-4 bg-gray-200 dark:bg-zinc-700 rounded w-5/6"></div>
               <div className="h-4 bg-gray-200 dark:bg-zinc-700 rounded w-4/6"></div>
-              <div className="h-4 bg-gray-200 dark:bg-zinc-700 rounded w-full"></div>
-              <div className="h-4 bg-gray-200 dark:bg-zinc-700 rounded w-3/4"></div>
             </div>
           ) : (
             <div className="font-serif text-xl leading-relaxed text-gray-800 dark:text-zinc-300 space-y-6">
@@ -165,7 +200,6 @@ const BookIntro: React.FC<BookIntroProps> = ({ book, onSelectMode, onBack }) => 
         </button>
       </div>
 
-      {/* Choice Modal for Retellings */}
       {showConfigModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-in">
            <div className="bg-paper dark:bg-zinc-900 max-w-xl w-full p-8 md:p-12 sketch-border shadow-2xl relative transition-colors duration-500">
@@ -178,7 +212,7 @@ const BookIntro: React.FC<BookIntroProps> = ({ book, onSelectMode, onBack }) => 
               
               <h2 className="text-4xl font-serif font-bold mb-4 dark:text-zinc-100">Optionen des Nach-Erlebens</h2>
               <p className="font-hand text-2xl text-gray-500 dark:text-zinc-400 mb-8 leading-tight">
-                Da dieses Werk noch geschützt ist, erstellen wir für dich ein personalisiertes Lese-Erlebnis.
+                Ach Nadine, dieses Werk ist noch geschützt. Aber keine Sorge, ich habe da was vorbereitet.
               </p>
 
               <div className="space-y-6">
@@ -187,7 +221,7 @@ const BookIntro: React.FC<BookIntroProps> = ({ book, onSelectMode, onBack }) => 
                   className={`w-full text-left p-6 border-2 transition-all ${pref === 'CHRONOLOGICAL' ? 'border-gray-800 dark:border-zinc-100 bg-gray-50 dark:bg-zinc-800' : 'border-gray-200 dark:border-zinc-800 hover:border-gray-400 dark:hover:border-zinc-600'}`}
                 >
                   <h4 className="text-xl font-bold font-serif dark:text-zinc-200">Chronologischer Rückblick</h4>
-                  <p className="font-hand text-lg text-gray-500 dark:text-zinc-500">Die Handlung so nah wie möglich am Original nacherzählt.</p>
+                  <p className="font-hand text-lg text-gray-500 dark:text-zinc-500">Ganz klassisch, so wie Nadine es mag.</p>
                 </button>
 
                 <div className={`p-6 border-2 transition-all ${pref === 'FOCUSED' ? 'border-gray-800 dark:border-zinc-100 bg-gray-50 dark:bg-zinc-800' : 'border-gray-200 dark:border-zinc-800'}`}>
@@ -196,7 +230,7 @@ const BookIntro: React.FC<BookIntroProps> = ({ book, onSelectMode, onBack }) => 
                     className="w-full text-left"
                    >
                      <h4 className="text-xl font-bold font-serif dark:text-zinc-200">Spezifischer Fokus</h4>
-                     <p className="font-hand text-lg text-gray-500 dark:text-zinc-500">Möchtest du dich auf bestimmte Motive oder Figuren konzentrieren?</p>
+                     <p className="font-hand text-lg text-gray-500 dark:text-zinc-500">Willst du dich auf etwas Bestimmtes konzentrieren?</p>
                    </button>
                    
                    {pref === 'FOCUSED' && (
@@ -204,7 +238,7 @@ const BookIntro: React.FC<BookIntroProps> = ({ book, onSelectMode, onBack }) => 
                        type="text"
                        value={focusText}
                        onChange={(e) => setFocusText(e.target.value)}
-                       placeholder="z.B. Die Beziehung zwischen den Protagonisten..."
+                       placeholder="z.B. Die Rolle der Vergänglichkeit..."
                        className="w-full mt-4 bg-transparent border-b border-gray-400 dark:border-zinc-600 outline-none font-serif py-2 dark:text-zinc-100"
                      />
                    )}

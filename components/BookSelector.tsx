@@ -6,7 +6,8 @@ import { searchBooks } from '../services/gemini';
 interface BookSelectorProps {
   onSelectBook: (book: Book) => void;
   intent?: 'REPLAY' | 'READ' | 'CHAT' | 'QUIZ';
-  persistentCategorized: {classics: Book[], contemporary: Book[], nonEuropean: Book[]} | null;
+  // Fix: Made persistentCategorized optional as it's not always provided (e.g., when viewing local collection)
+  persistentCategorized?: {classics: Book[], contemporary: Book[], nonEuropean: Book[]} | null;
   persistentGeneral: Book[] | null;
   isLoading: boolean;
   hideSearch?: boolean; // Neue Prop
